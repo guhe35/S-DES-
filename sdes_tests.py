@@ -302,10 +302,140 @@ class SDESTester:
                     colliding_keys = [key for key, ct in ciphertexts if ct == ciphertext]
                     print(f"密文 {ciphertext}: {count} 个密钥 -> {colliding_keys}")
         
+        # 新增：全面密钥碰撞测试
+        print(f"\n🔬 全面密钥碰撞分析:")
+        print("对明文空间中的任意分组，检查是否存在不同密钥产生相同密文的情况")
+        
+        # 测试多个不同的明文分组
+        test_plaintexts = [
+            "00000000",  # 全零
+            "11111111",  # 全一
+            "10101010",  # 交替模式1
+            "01010101",  # 交替模式2
+            "11001100",  # 重复模式1
+            "00110011",  # 重复模式2
+            "10000001",  # 边界模式1
+            "01111110",  # 边界模式2
+            "10111101",  # 标准测试
+            "01100011"   # 随机模式
+        ]
+        
+        total_collisions = 0
+        collision_details = []
+        
+        print(f"\n📊 测试 {len(test_plaintexts)} 个明文分组的密钥碰撞:")
+        
+        for i, pt in enumerate(test_plaintexts, 1):
+            print(f"\n🔍 明文分组 {i}: {pt}")
+            
+            # 生成所有可能的密钥（简化版本，实际测试时可以选择性测试）
+            # 为了测试效率，我们测试更多密钥但不超过256个
+            test_keys_extended = []
+            
+            # 添加原始测试密钥
+            test_keys_extended.extend(test_keys)
+            
+            # 添加更多测试密钥（系统化生成）
+            for j in range(16):  # 测试16个额外密钥
+                key_bits = format(j, '010b')  # 10位二进制
+                if key_bits not in test_keys_extended:
+                    test_keys_extended.append(key_bits)
+            
+            # 添加一些特殊密钥模式
+            special_keys = [
+                "1010000000", "0101111111", "1000000000", "0111111111",
+                "1100000000", "0011111111", "1111000000", "0000111111"
+            ]
+            for sk in special_keys:
+                if sk not in test_keys_extended:
+                    test_keys_extended.append(sk)
+            
+            # 测试当前明文
+            pt_ciphertexts = []
+            valid_keys = 0
+            
+            for key in test_keys_extended:
+                try:
+                    ciphertext = self.sdes.encrypt_block(pt, key)
+                    pt_ciphertexts.append((key, ciphertext))
+                    valid_keys += 1
+                except Exception as e:
+                    pass  # 忽略无效密钥
+            
+            # 检查当前明文下的密钥碰撞
+            pt_ciphertext_values = [ct[1] for ct in pt_ciphertexts]
+            pt_unique_ciphertexts = set(pt_ciphertext_values)
+            
+            pt_has_collision = len(pt_unique_ciphertexts) < len(pt_ciphertext_values)
+            
+            if pt_has_collision:
+                total_collisions += 1
+                collision_info = {
+                    'plaintext': pt,
+                    'total_keys': valid_keys,
+                    'unique_ciphertexts': len(pt_unique_ciphertexts),
+                    'collisions': []
+                }
+                
+                # 记录碰撞详情
+                for ciphertext in pt_unique_ciphertexts:
+                    count = pt_ciphertext_values.count(ciphertext)
+                    if count > 1:
+                        colliding_keys = [key for key, ct in pt_ciphertexts if ct == ciphertext]
+                        collision_info['collisions'].append({
+                            'ciphertext': ciphertext,
+                            'count': count,
+                            'keys': colliding_keys
+                        })
+                
+                collision_details.append(collision_info)
+                
+                status = "❌ 存在碰撞"
+                print(f"  {status} - {len(pt_unique_ciphertexts)}/{valid_keys} 唯一密文")
+                
+                # 显示前几个碰撞
+                for collision in collision_info['collisions'][:2]:  # 只显示前2个碰撞
+                    print(f"    密文 {collision['ciphertext']}: {collision['count']} 个密钥碰撞")
+            else:
+                status = "✅ 无碰撞"
+                print(f"  {status} - {len(pt_unique_ciphertexts)}/{valid_keys} 唯一密文")
+        
+        # 碰撞统计分析
+        print(f"\n📈 密钥碰撞统计分析:")
+        print(f"测试明文分组数: {len(test_plaintexts)}")
+        print(f"存在碰撞的明文: {total_collisions}")
+        print(f"碰撞率: {(total_collisions/len(test_plaintexts)*100):.1f}%")
+        
+        if collision_details:
+            print(f"\n⚠️  详细碰撞报告:")
+            for detail in collision_details[:3]:  # 显示前3个碰撞详情
+                print(f"\n明文 {detail['plaintext']}:")
+                print(f"  总密钥数: {detail['total_keys']}")
+                print(f"  唯一密文数: {detail['unique_ciphertexts']}")
+                print(f"  碰撞数: {len(detail['collisions'])}")
+                
+                for collision in detail['collisions'][:2]:  # 显示前2个碰撞
+                    print(f"    密文 {collision['ciphertext']}: {collision['keys']}")
+        
+        # 安全性结论
+        print(f"\n🛡️  密钥碰撞安全性结论:")
+        if total_collisions == 0:
+            print("✅ 对于测试的明文分组，未发现密钥碰撞现象")
+            print("✅ 不同密钥对同一明文产生不同密文")
+            collision_safety = True
+        elif total_collisions < len(test_plaintexts) * 0.1:  # 碰撞率低于10%
+            print("⚠️  存在少量密钥碰撞现象")
+            print("⚠️  部分不同密钥对同一明文可能产生相同密文")
+            collision_safety = False
+        else:
+            print("❌ 存在较多密钥碰撞现象")
+            print("❌ 大量不同密钥对同一明文产生相同密文")
+            collision_safety = False
+        
         # 测试不同明文使用相同密钥
         print(f"\n🔍 测试明文敏感性:")
         key = "1010000010"
-        test_plaintexts = [
+        test_plaintexts_sensitivity = [
             "10111101",
             "01000010", 
             "11111111",
@@ -314,7 +444,7 @@ class SDESTester:
         ]
         
         plaintext_ciphertexts = []
-        for pt in test_plaintexts:
+        for pt in test_plaintexts_sensitivity:
             try:
                 ct = self.sdes.encrypt_block(pt, key)
                 plaintext_ciphertexts.append((pt, ct))
@@ -343,13 +473,17 @@ class SDESTester:
         print(f"平均破解时间: < 1秒")
         print(f"安全等级: ⚠️ 教学级别（不安全）")
         
+        if total_collisions > 0:
+            print(f"⚠️  密钥碰撞风险: 存在 {total_collisions} 个明文分组存在密钥碰撞")
+            print(f"⚠️  实际密钥空间可能小于理论值 {key_space}")
+        
         # 综合评估
         security_score = 0
-        if not has_collision:
+        if collision_safety:  # 无密钥碰撞
             security_score += 1
-        if plaintext_sensitivity:
+        if plaintext_sensitivity:  # 明文敏感
             security_score += 1
-        if passed == len(test_keys):
+        if passed == len(test_keys):  # 基本功能正常
             security_score += 1
         
         total_tests = 3
